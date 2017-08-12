@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS reservation (
 
 CREATE TABLE IF NOT EXISTS status (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  code VARCHAR(50) NOT NULL
+  code VARCHAR(50) NOT NULL,
+  INDEX(code(50))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS status_history (
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS transaction (
 
 CREATE TABLE IF NOT EXISTS transaction_type (
   id INT PRIMARY KEY AUTO_INCREMENT,
-  code VARCHAR(50) NOT NULL
+  code VARCHAR(50) NOT NULL,
+  INDEX(code(50))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS state (
@@ -91,7 +93,7 @@ INSERT INTO transaction_type (code) VALUES
   ('SELL'),
   ('SELL_PARENT'),
   ('PAY'),
-  ('TRANSFER_BLU'),
+  ('DONATE'),
   ('AJUST_INVENTORY');
 
 INSERT INTO state (code, name) VALUES
@@ -113,6 +115,9 @@ INSERT INTO status (code) VALUES
   ('VALID'),
   ('OUTDATED'),
   ('REMOVED');
+
+INSERT INTO employee (username, password, admin, active) VALUES
+  ('admin', 'blublublu', true, true);
 
 -- Rename tables
 RENAME TABLE villes TO city;
@@ -195,13 +200,17 @@ ALTER TABLE member
   DROP COLUMN noteTelephone2,
   ADD COLUMN is_parent BOOLEAN DEFAULT false;
 
+SELECT @add := id FROM transaction_type WHERE code='ADD';
+SELECT @sell := id FROM transaction_type WHERE code='SELL';
+SELECT @pay := id FROM transaction_type WHERE code='PAY';
+
 -- Copy and Transaction table
-INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateAjout, 1
+INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateAjout, @add
                                                    FROM copy;
-INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateVente, 3
+INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateVente, @sell
                                                    FROM copy
                                                    WHERE dateVente IS NOT NULL;
-INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateRemiseArgent, 5
+INSERT INTO transaction (member, copy, date, type) SELECT member, id, dateRemiseArgent, @pay
                                                    FROM copy
                                                    WHERE dateRemiseArgent IS NOT NULL;
 
@@ -219,19 +228,23 @@ ALTER TABLE item
   ADD COLUMN is_book BOOLEAN NOT NULL DEFAULT true,
   ADD COLUMN comment TEXT;
 
-UPDATE item SET status=3 WHERE dateRetrait IS NOT NULL;
-UPDATE item SET status=2 WHERE dateDesuet IS NOT NULL AND dateRetrait IS NULL;
+SELECT @valid := id FROM status WHERE code='VALID';
+SELECT @outdated := id FROM status WHERE code='OUTDATED';
+SELECT @removed := id FROM status WHERE code='REMOVED';
+
+UPDATE item SET status=@removed WHERE dateRetrait IS NOT NULL;
+UPDATE item SET status=@outdated WHERE dateDesuet IS NOT NULL AND dateRetrait IS NULL;
 UPDATE item SET is_book=false WHERE titre='Objet générique (caculatrice, lunettes protectrices, sarau, etc.)';
 
 INSERT INTO status_history (item, status, date) SELECT idOuvrage, status, dateAjout
                                                 FROM item
-                                                WHERE status=1;
+                                                WHERE status=@valid;
 INSERT INTO status_history (item, status, date) SELECT idOuvrage, status, dateDesuet
                                                 FROM item
-                                                WHERE status=2;
+                                                WHERE status=@outdated;
 INSERT INTO status_history (item, status, date) SELECT idOuvrage, status, dateRetrait
                                                 FROM item
-                                                WHERE status=3;
+                                                WHERE status=@removed;
 
 ALTER TABLE item
   CHANGE COLUMN idOuvrage id INT AUTO_INCREMENT,
@@ -244,7 +257,8 @@ ALTER TABLE item
   DROP COLUMN dateValidation,
   DROP COLUMN dateAjout,
   DROP COLUMN dateDesuet,
-  DROP COLUMN dateRetrait;
+  DROP COLUMN dateRetrait,
+  ADD INDEX (ean13(13));
 
 UPDATE item i, editeurs e SET i.editor = e.nomEditeur WHERE i.editor = e.idEditeur;
 
@@ -255,12 +269,12 @@ ALTER TABLE storage
 
 ALTER TABLE subject
   CHANGE COLUMN idMatiere id INT AUTO_INCREMENT,
-  CHANGE COLUMN nomMatiere name VARCHAR(50) NOT NULL,
+  CHANGE COLUMN nomMatiere name VARCHAR(250) NOT NULL,
   CHANGE COLUMN idCategorie category INT NOT NULL;
 
 ALTER TABLE category
   CHANGE COLUMN idCategorie id INT AUTO_INCREMENT,
-  CHANGE COLUMN nomCategorie name VARCHAR(50) NOT NULL;
+  CHANGE COLUMN nomCategorie name VARCHAR(100) NOT NULL;
 
 ALTER TABLE item_author
   CHANGE COLUMN idOuvrage item INT,
@@ -272,12 +286,63 @@ ALTER TABLE author
   CHANGE COLUMN prenom first_name VARCHAR(75),
   CHANGE COLUMN nom last_name VARCHAR(75);
 
+DELETE FROM comment WHERE member NOT IN(SELECT no FROM member);
+DELETE FROM item_author WHERE item NOT IN (SELECT id FROM item);
 
 -- Add foreign keys
+ALTER TABLE city
+  ADD FOREIGN KEY (state) REFERENCES state(code) ON UPDATE CASCADE ON DELETE RESTRICT;
 
--- TODO: Verify these table names
+ALTER TABLE member
+  ADD FOREIGN KEY (city) REFERENCES city(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE comment
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (updated_by) REFERENCES employee(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE phone
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE subject
+  ADD FOREIGN KEY (category) REFERENCES category(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE item
+  ADD FOREIGN KEY (subject) REFERENCES subject(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (status) REFERENCES status(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE status_history
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (status) REFERENCES status(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE item_author
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (author) REFERENCES author(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE storage
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE copy
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE transaction
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (copy) REFERENCES copy(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (type) REFERENCES transaction_type(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE error
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE reservation
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE item_feed
+  ADD FOREIGN KEY (item) REFERENCES item(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  ADD FOREIGN KEY (member) REFERENCES member(no) ON UPDATE CASCADE ON DELETE RESTRICT;
+
 -- Delete useless tables
--- DROP TABLE `code_postaux_qc_2009`;
--- DROP TABLE securite;
--- DROP TABLE reservations;
+DROP TABLE IF EXISTS code_postaux_qc_2009;
+DROP TABLE IF EXISTS securite;
+DROP TABLE IF EXISTS reservations;
 DROP TABLE editeurs
