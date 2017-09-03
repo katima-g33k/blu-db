@@ -345,4 +345,4 @@ ALTER TABLE item_feed
 DROP TABLE IF EXISTS code_postaux_qc_2009;
 DROP TABLE IF EXISTS securite;
 DROP TABLE IF EXISTS reservations;
-DROP TABLE editeurs
+DROP TABLE editeurs;
